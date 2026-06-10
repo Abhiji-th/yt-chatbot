@@ -3,6 +3,7 @@ from langchain_classic.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, GoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,7 +17,8 @@ embeddings = GoogleGenerativeAIEmbeddings(
 )
 
 llm = GoogleGenerativeAI(
-    model="gemini-3.1-flash-lite"
+    model="gemini-3.1-flash-lite",
+    temperature=0.5
 )
 
 try:
@@ -40,11 +42,11 @@ vectorstore = FAISS.load_local(
 
 retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k":4})
 
-question = "What is valorant"
+query = "What is Deepmind"
 
-retrieved_docs = retriever.invoke(question)
-
-context = "\n\n".join(doc.page_content for doc in retrieved_docs)
+def format_docs(retrieved_docs):
+    context = "\n\n".join(doc.page_content for doc in retrieved_docs)
+    return context
 
 prompt = PromptTemplate(
     template="""
@@ -53,13 +55,18 @@ prompt = PromptTemplate(
       If the context is insufficient, just say you don't know.
 
       {context}
-      Question: {question}
+      Question: {query}
     """,
-    input_variables=["context", "question"]
+    input_variables=["context", "query"]
 )
 
-final_prompt = prompt.invoke({"context": context, "question": question})
+parallel_chain = RunnableParallel({
+    "context": retriever | RunnableLambda(format_docs),
+    "query": RunnablePassthrough()
+})
 
-result = llm.invoke(final_prompt)
+chain = parallel_chain | prompt | llm
+
+result = chain.invoke(query)
 
 print(result)
